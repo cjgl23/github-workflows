@@ -1,0 +1,75 @@
+name: Reusable Maven CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directories-json: {required: true, type: string}
+      runner-os: {required: false, type: string, default: ubuntu-latest}
+      runtime-version: {required: false, type: string, default: ''}
+      run-lint: {required: false, type: boolean, default: true}
+      run-tests: {required: false, type: boolean, default: true}
+      run-build: {required: false, type: boolean, default: true}
+      custom-lint-command: {required: false, type: string, default: ''}
+      custom-test-command: {required: false, type: string, default: ''}
+      custom-build-command: {required: false, type: string, default: ''}
+
+permissions:
+  contents: read
+
+jobs:
+  maven:
+    name: Maven (${{ matrix.directory }})
+    runs-on: ${{ inputs.runner-os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJSON(inputs.working-directories-json) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.runtime-version != '' && inputs.runtime-version || '21' }}
+
+      - name: Select Maven command
+        id: mvn
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f mvnw ]]; then chmod +x mvnw; echo "cmd=./mvnw" >> "$GITHUB_OUTPUT";
+          elif command -v mvn >/dev/null 2>&1; then echo "cmd=mvn" >> "$GITHUB_OUTPUT";
+          else echo "Neither mvnw nor mvn is available" >&2; exit 1; fi
+
+      - name: Lint/custom validation
+        if: inputs.run-lint
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-lint-command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; else echo "No framework-independent Maven lint goal is assumed; skipped."; fi
+
+      - name: Test
+        if: inputs.run-tests
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-test-command }}
+          MVN: ${{ steps.mvn.outputs.cmd }}
+        run: if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; else "$MVN" --batch-mode test; fi
+
+      - name: Build
+        if: inputs.run-build
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-build-command }}
+          MVN: ${{ steps.mvn.outputs.cmd }}
+        run: if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; else "$MVN" --batch-mode -DskipTests package; fi
