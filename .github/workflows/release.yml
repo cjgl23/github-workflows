@@ -1,0 +1,128 @@
+name: Reusable Release
+
+on:
+  workflow_call:
+    inputs:
+      target-sha:
+        description: Exact commit SHA that passed CI
+        required: true
+        type: string
+      default-branch:
+        description: Caller repository default branch
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Version, tag, and GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate target SHA format
+        shell: bash
+        env:
+          TARGET_SHA: ${{ inputs.target-sha }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "target-sha must be a full commit SHA" >&2; exit 2; }
+
+      - name: Checkout exact tested caller commit
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          ref: ${{ inputs.target-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify target belongs to default branch
+        shell: bash
+        env:
+          TARGET_SHA: ${{ inputs.target-sha }}
+          DEFAULT_BRANCH: ${{ inputs.default-branch }}
+        run: |
+          set -euo pipefail
+          git rev-parse --verify "${TARGET_SHA}^{commit}" >/dev/null
+          git rev-parse --verify "refs/remotes/origin/${DEFAULT_BRANCH}^{commit}" >/dev/null
+          git merge-base --is-ancestor "$TARGET_SHA" "origin/$DEFAULT_BRANCH" || {
+            echo "Refusing release: target SHA is not on origin/$DEFAULT_BRANCH" >&2
+            exit 3
+          }
+
+      - name: Load release policy from pinned workflow revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            "https://raw.githubusercontent.com/${{ job.workflow_repository }}/${{ job.workflow_sha }}/scripts/release_policy.py" \
+            --output "$RUNNER_TEMP/release_policy.py"
+
+      - name: Determine release decision
+        id: version
+        shell: bash
+        env:
+          TARGET_SHA: ${{ inputs.target-sha }}
+        run: |
+          set -euo pipefail
+          last_tag="$(git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --abbrev=0 "$TARGET_SHA" 2>/dev/null || true)"
+          if [[ -z "$last_tag" ]]; then
+            last_tag="v0.0.0"
+            git ls-tree -r --name-only "$TARGET_SHA" > "$RUNNER_TEMP/changed-files.txt"
+            git log --format='%s%n%b' "$TARGET_SHA" > "$RUNNER_TEMP/commits.txt"
+          else
+            if git tag --points-at "$TARGET_SHA" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "release_needed=false" >> "$GITHUB_OUTPUT"
+              echo "Commit already has a semantic-version tag."
+              exit 0
+            fi
+            git diff --name-only "${last_tag}..${TARGET_SHA}" > "$RUNNER_TEMP/changed-files.txt"
+            git log --format='%s%n%b' "${last_tag}..${TARGET_SHA}" > "$RUNNER_TEMP/commits.txt"
+          fi
+          python "$RUNNER_TEMP/release_policy.py" \
+            --last-tag "$last_tag" \
+            --commits-file "$RUNNER_TEMP/commits.txt" \
+            --files-file "$RUNNER_TEMP/changed-files.txt" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Create annotated tag object and ref
+        if: steps.version.outputs.release_needed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ inputs.target-sha }}
+          NEXT_TAG: ${{ steps.version.outputs.next_tag }}
+        run: |
+          set -euo pipefail
+          tag_object_sha="$(gh api --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/git/tags" \
+            -f tag="$NEXT_TAG" \
+            -f message="Release $NEXT_TAG" \
+            -f object="$TARGET_SHA" \
+            -f type='commit' \
+            --jq '.sha')"
+          gh api --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/$NEXT_TAG" \
+            -f sha="$tag_object_sha" >/dev/null
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.release_needed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LAST_TAG: ${{ steps.version.outputs.last_tag }}
+          NEXT_TAG: ${{ steps.version.outputs.next_tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$LAST_TAG" == "v0.0.0" ]]; then
+            gh release create "$NEXT_TAG" --repo "$GITHUB_REPOSITORY" --title "$NEXT_TAG" --generate-notes
+          else
+            gh release create "$NEXT_TAG" --repo "$GITHUB_REPOSITORY" --title "$NEXT_TAG" --generate-notes --notes-start-tag "$LAST_TAG"
+          fi
