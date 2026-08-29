@@ -1,0 +1,49 @@
+name: Reusable Security
+
+on:
+  workflow_call:
+    inputs:
+      severity:
+        required: false
+        type: string
+        default: HIGH,CRITICAL
+      ignore-unfixed:
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  trivy:
+    name: Trivy repository scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Load checksum-verified Trivy installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            "https://raw.githubusercontent.com/${{ job.workflow_repository }}/${{ job.workflow_sha }}/scripts/install_trivy.sh" \
+            --output "$RUNNER_TEMP/install_trivy.sh"
+          chmod +x "$RUNNER_TEMP/install_trivy.sh"
+          "$RUNNER_TEMP/install_trivy.sh" "$RUNNER_TEMP/trivy-bin"
+
+      - name: Scan vulnerabilities, secrets, and misconfiguration
+        shell: bash
+        env:
+          SEVERITY: ${{ inputs.severity }}
+          IGNORE_UNFIXED: ${{ inputs.ignore-unfixed }}
+        run: |
+          set -euo pipefail
+          args=(fs --scanners vuln,secret,misconfig --severity "$SEVERITY" --exit-code 1)
+          if [[ "$IGNORE_UNFIXED" == "true" ]]; then args+=(--ignore-unfixed); fi
+          trivy "${args[@]}" .
