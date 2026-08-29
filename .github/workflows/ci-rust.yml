@@ -1,0 +1,68 @@
+name: Reusable Rust CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directories-json: {required: true, type: string}
+      runner-os: {required: false, type: string, default: ubuntu-latest}
+      runtime-version: {required: false, type: string, default: ''}
+      run-lint: {required: false, type: boolean, default: true}
+      run-tests: {required: false, type: boolean, default: true}
+      run-build: {required: false, type: boolean, default: true}
+      custom-lint-command: {required: false, type: string, default: ''}
+      custom-test-command: {required: false, type: string, default: ''}
+      custom-build-command: {required: false, type: string, default: ''}
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.directory }})
+    runs-on: ${{ inputs.runner-os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJSON(inputs.working-directories-json) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Configure Rust toolchain
+        shell: bash
+        env:
+          RUNTIME_VERSION: ${{ inputs.runtime-version }}
+        run: |
+          set -euo pipefail
+          toolchain="${RUNTIME_VERSION:-stable}"
+          rustup toolchain install "$toolchain" --profile minimal --component rustfmt,clippy
+          rustup default "$toolchain"
+
+      - name: Lint
+        if: inputs.run-lint
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-lint-command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; else cargo fmt --all -- --check && cargo clippy --all-targets --all-features -- -D warnings; fi
+
+      - name: Test
+        if: inputs.run-tests
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-test-command }}
+        run: if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; elif [[ -f Cargo.lock ]]; then cargo test --locked; else cargo test; fi
+
+      - name: Build
+        if: inputs.run-build
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-build-command }}
+        run: if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; elif [[ -f Cargo.lock ]]; then cargo build --locked; else cargo build; fi
