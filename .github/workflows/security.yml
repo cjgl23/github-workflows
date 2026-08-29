@@ -44,6 +44,6 @@ jobs:
           IGNORE_UNFIXED: ${{ inputs.ignore-unfixed }}
         run: |
           set -euo pipefail
-          args=(fs --scanners vuln,secret,misconfig --severity "$SEVERITY" --exit-code 1)
+          args=(fs --scanners "vuln,secret,misconfig" --severity "$SEVERITY" --exit-code 1)
           if [[ "$IGNORE_UNFIXED" == "true" ]]; then args+=(--ignore-unfixed); fi
           trivy "${args[@]}" .
