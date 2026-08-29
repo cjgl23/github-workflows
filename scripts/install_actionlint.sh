@@ -4,8 +4,8 @@ set -euo pipefail
 VERSION="1.7.12"
 EXPECTED_SHA256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
 DEST="${1:-${RUNNER_TEMP:-/tmp}/actionlint-bin}"
-ARCHIVE="${RUNNER_TEMP:-/tmp}/actionlint_${VERSION}_linux_x86_64.tar.gz"
-URL="https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_x86_64.tar.gz"
+ARCHIVE="${RUNNER_TEMP:-/tmp}/actionlint_${VERSION}_linux_amd64.tar.gz"
+URL="https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
 
 mkdir -p "$DEST"
 curl --fail --silent --show-error --location "$URL" --output "$ARCHIVE"

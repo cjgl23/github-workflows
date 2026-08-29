@@ -38,3 +38,53 @@ jobs:
 
       - name: Validate GitHub Actions YAML
         run: actionlint
+
+  fixture-node:
+    uses: $/.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/node
+
+  fixture-python:
+    uses: $/.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/python
+
+  fixture-go:
+    uses: $/.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/go
+
+  fixture-maven:
+    uses: $/.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/maven
+      run-lint: false
+
+  fixture-gradle:
+    uses: $/.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/gradle
+      run-lint: false
+
+  fixture-dotnet:
+    uses: $/.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/dotnet
+      run-lint: false
+
+  fixture-rust:
+    uses: $/.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/rust
+
+  fixture-generic:
+    uses: $/.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/generic
+
+  fixture-monorepo:
+    uses: $/.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/monorepo
+      run-lint: false
+      run-build: false
