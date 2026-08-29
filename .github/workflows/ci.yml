@@ -1,0 +1,235 @@
+name: Reusable CI
+
+on:
+  workflow_call:
+    inputs:
+      project-type:
+        description: Project profile or auto
+        required: false
+        type: string
+        default: auto
+      working-directory:
+        description: Root directory to inspect
+        required: false
+        type: string
+        default: .
+      run-lint:
+        required: false
+        type: boolean
+        default: true
+      run-tests:
+        required: false
+        type: boolean
+        default: true
+      run-build:
+        required: false
+        type: boolean
+        default: true
+      runtime-version:
+        required: false
+        type: string
+        default: ''
+      custom-lint-command:
+        required: false
+        type: string
+        default: ''
+      custom-test-command:
+        required: false
+        type: string
+        default: ''
+      custom-build-command:
+        required: false
+        type: string
+        default: ''
+      fail-on-unknown-project:
+        required: false
+        type: boolean
+        default: false
+      runner-os:
+        required: false
+        type: string
+        default: ubuntu-latest
+    outputs:
+      detected-profiles:
+        description: Compact JSON map of detected profiles to directories
+        value: ${{ jobs.detect.outputs.profiles }}
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: Detect project profiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      profiles: ${{ steps.detect.outputs.profiles }}
+      node: ${{ steps.detect.outputs.node }}
+      python: ${{ steps.detect.outputs.python }}
+      go: ${{ steps.detect.outputs.go }}
+      maven: ${{ steps.detect.outputs.maven }}
+      gradle: ${{ steps.detect.outputs.gradle }}
+      dotnet: ${{ steps.detect.outputs.dotnet }}
+      rust: ${{ steps.detect.outputs.rust }}
+      generic: ${{ steps.detect.outputs.generic }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load detector from pinned workflow revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            "https://raw.githubusercontent.com/${{ job.workflow_repository }}/${{ job.workflow_sha }}/scripts/detect_projects.py" \
+            --output "$RUNNER_TEMP/detect_projects.py"
+
+      - name: Detect profiles
+        id: detect
+        shell: bash
+        env:
+          PROJECT_TYPE: ${{ inputs.project-type }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          FAIL_ON_UNKNOWN: ${{ inputs.fail-on-unknown-project }}
+        run: |
+          set -euo pipefail
+          profiles="$(python "$RUNNER_TEMP/detect_projects.py" \
+            --root . \
+            --project-type "$PROJECT_TYPE" \
+            --working-directory "$WORKING_DIRECTORY")"
+          echo "profiles=$profiles" >> "$GITHUB_OUTPUT"
+          python - "$profiles" "$GITHUB_OUTPUT" "$FAIL_ON_UNKNOWN" <<'PY'
+          import json
+          import sys
+          data = json.loads(sys.argv[1])
+          out = sys.argv[2]
+          fail_unknown = sys.argv[3].lower() == "true"
+          with open(out, "a", encoding="utf-8") as handle:
+              for key in ("node", "python", "go", "maven", "gradle", "dotnet", "rust", "generic"):
+                  handle.write(f"{key}={json.dumps(data.get(key, []), separators=(',', ':'))}\n")
+          if fail_unknown and data.get("generic") and not any(data.get(k) for k in data if k != "generic"):
+              print("Unknown/generic project detected and fail-on-unknown-project=true", file=sys.stderr)
+              raise SystemExit(2)
+          print("Detected profiles:", json.dumps(data, sort_keys=True))
+          PY
+
+  generic:
+    needs: detect
+    if: needs.detect.outputs.generic != '[]'
+    uses: $/.github/workflows/ci-generic.yml
+    with:
+      working-directories-json: ${{ needs.detect.outputs.generic }}
+      runner-os: ${{ inputs.runner-os }}
+      run-lint: ${{ inputs.run-lint }}
+      run-tests: ${{ inputs.run-tests }}
+      run-build: ${{ inputs.run-build }}
+      custom-lint-command: ${{ inputs.custom-lint-command }}
+      custom-test-command: ${{ inputs.custom-test-command }}
+      custom-build-command: ${{ inputs.custom-build-command }}
+
+  node:
+    needs: detect
+    if: needs.detect.outputs.node != '[]'
+    uses: $/.github/workflows/ci-node.yml
+    with:
+      working-directories-json: ${{ needs.detect.outputs.node }}
+      runner-os: ${{ inputs.runner-os }}
+      runtime-version: ${{ inputs.runtime-version }}
+      run-lint: ${{ inputs.run-lint }}
+      run-tests: ${{ inputs.run-tests }}
+      run-build: ${{ inputs.run-build }}
+      custom-lint-command: ${{ inputs.custom-lint-command }}
+      custom-test-command: ${{ inputs.custom-test-command }}
+      custom-build-command: ${{ inputs.custom-build-command }}
+
+  python:
+    needs: detect
+    if: needs.detect.outputs.python != '[]'
+    uses: $/.github/workflows/ci-python.yml
+    with:
+      working-directories-json: ${{ needs.detect.outputs.python }}
+      runner-os: ${{ inputs.runner-os }}
+      runtime-version: ${{ inputs.runtime-version }}
+      run-lint: ${{ inputs.run-lint }}
+      run-tests: ${{ inputs.run-tests }}
+      run-build: ${{ inputs.run-build }}
+      custom-lint-command: ${{ inputs.custom-lint-command }}
+      custom-test-command: ${{ inputs.custom-test-command }}
+      custom-build-command: ${{ inputs.custom-build-command }}
+
+  go:
+    needs: detect
+    if: needs.detect.outputs.go != '[]'
+    uses: $/.github/workflows/ci-go.yml
+    with:
+      working-directories-json: ${{ needs.detect.outputs.go }}
+      runner-os: ${{ inputs.runner-os }}
+      runtime-version: ${{ inputs.runtime-version }}
+      run-lint: ${{ inputs.run-lint }}
+      run-tests: ${{ inputs.run-tests }}
+      run-build: ${{ inputs.run-build }}
+      custom-lint-command: ${{ inputs.custom-lint-command }}
+      custom-test-command: ${{ inputs.custom-test-command }}
+      custom-build-command: ${{ inputs.custom-build-command }}
+
+  maven:
+    needs: detect
+    if: needs.detect.outputs.maven != '[]'
+    uses: $/.github/workflows/ci-java-maven.yml
+    with:
+      working-directories-json: ${{ needs.detect.outputs.maven }}
+      runner-os: ${{ inputs.runner-os }}
+      runtime-version: ${{ inputs.runtime-version }}
+      run-lint: ${{ inputs.run-lint }}
+      run-tests: ${{ inputs.run-tests }}
+      run-build: ${{ inputs.run-build }}
+      custom-lint-command: ${{ inputs.custom-lint-command }}
+      custom-test-command: ${{ inputs.custom-test-command }}
+      custom-build-command: ${{ inputs.custom-build-command }}
+
+  gradle:
+    needs: detect
+    if: needs.detect.outputs.gradle != '[]'
+    uses: $/.github/workflows/ci-java-gradle.yml
+    with:
+      working-directories-json: ${{ needs.detect.outputs.gradle }}
+      runner-os: ${{ inputs.runner-os }}
+      runtime-version: ${{ inputs.runtime-version }}
+      run-lint: ${{ inputs.run-lint }}
+      run-tests: ${{ inputs.run-tests }}
+      run-build: ${{ inputs.run-build }}
+      custom-lint-command: ${{ inputs.custom-lint-command }}
+      custom-test-command: ${{ inputs.custom-test-command }}
+      custom-build-command: ${{ inputs.custom-build-command }}
+
+  dotnet:
+    needs: detect
+    if: needs.detect.outputs.dotnet != '[]'
+    uses: $/.github/workflows/ci-dotnet.yml
+    with:
+      working-directories-json: ${{ needs.detect.outputs.dotnet }}
+      runner-os: ${{ inputs.runner-os }}
+      runtime-version: ${{ inputs.runtime-version }}
+      run-lint: ${{ inputs.run-lint }}
+      run-tests: ${{ inputs.run-tests }}
+      run-build: ${{ inputs.run-build }}
+      custom-lint-command: ${{ inputs.custom-lint-command }}
+      custom-test-command: ${{ inputs.custom-test-command }}
+      custom-build-command: ${{ inputs.custom-build-command }}
+
+  rust:
+    needs: detect
+    if: needs.detect.outputs.rust != '[]'
+    uses: $/.github/workflows/ci-rust.yml
+    with:
+      working-directories-json: ${{ needs.detect.outputs.rust }}
+      runner-os: ${{ inputs.runner-os }}
+      runtime-version: ${{ inputs.runtime-version }}
+      run-lint: ${{ inputs.run-lint }}
+      run-tests: ${{ inputs.run-tests }}
+      run-build: ${{ inputs.run-build }}
+      custom-lint-command: ${{ inputs.custom-lint-command }}
+      custom-test-command: ${{ inputs.custom-test-command }}
+      custom-build-command: ${{ inputs.custom-build-command }}

@@ -1,0 +1,50 @@
+name: Reusable Generic CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directories-json: {required: true, type: string}
+      runner-os: {required: false, type: string, default: ubuntu-latest}
+      run-lint: {required: false, type: boolean, default: true}
+      run-tests: {required: false, type: boolean, default: true}
+      run-build: {required: false, type: boolean, default: true}
+      custom-lint-command: {required: false, type: string, default: ''}
+      custom-test-command: {required: false, type: string, default: ''}
+      custom-build-command: {required: false, type: string, default: ''}
+
+permissions:
+  contents: read
+
+jobs:
+  generic:
+    name: Generic (${{ matrix.directory }})
+    runs-on: ${{ inputs.runner-os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJSON(inputs.working-directories-json) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Run custom lint command
+        if: inputs.run-lint && inputs.custom-lint-command != ''
+        run: ${{ inputs.custom-lint-command }}
+
+      - name: Run custom test command
+        if: inputs.run-tests && inputs.custom-test-command != ''
+        run: ${{ inputs.custom-test-command }}
+
+      - name: Run custom build command
+        if: inputs.run-build && inputs.custom-build-command != ''
+        run: ${{ inputs.custom-build-command }}
+
+      - name: Report conservative generic mode
+        if: inputs.custom-lint-command == '' && inputs.custom-test-command == '' && inputs.custom-build-command == ''
+        run: echo "No project-specific commands were guessed. Supply explicit custom commands when this repository needs validation."
