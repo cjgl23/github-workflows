@@ -88,3 +88,42 @@ jobs:
       working-directory: tests/fixtures/monorepo
       run-lint: false
       run-build: false
+
+  validation-complete:
+    if: ${{ always() }}
+    needs:
+      - validate
+      - fixture-node
+      - fixture-python
+      - fixture-go
+      - fixture-maven
+      - fixture-gradle
+      - fixture-dotnet
+      - fixture-rust
+      - fixture-generic
+      - fixture-monorepo
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every validation dependency to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failures = {
+              name: data.get("result")
+              for name, data in needs.items()
+              if data.get("result") != "success"
+          }
+
+          if failures:
+              print("Validation dependencies did not all succeed:", failures)
+              sys.exit(1)
+
+          print("All validation dependencies succeeded.")
+          PY
