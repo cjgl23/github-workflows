@@ -1,0 +1,89 @@
+name: Reusable Node CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directories-json: {required: true, type: string}
+      runner-os: {required: false, type: string, default: ubuntu-latest}
+      runtime-version: {required: false, type: string, default: ''}
+      run-lint: {required: false, type: boolean, default: true}
+      run-tests: {required: false, type: boolean, default: true}
+      run-build: {required: false, type: boolean, default: true}
+      custom-lint-command: {required: false, type: string, default: ''}
+      custom-test-command: {required: false, type: string, default: ''}
+      custom-build-command: {required: false, type: string, default: ''}
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Node (${{ matrix.directory }})
+    runs-on: ${{ inputs.runner-os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJSON(inputs.working-directories-json) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.runtime-version != '' && inputs.runtime-version || '22' }}
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f pnpm-lock.yaml ]]; then
+            corepack enable
+            pnpm install --frozen-lockfile
+          elif [[ -f yarn.lock ]]; then
+            corepack enable
+            if [[ -f .yarnrc.yml ]]; then yarn install --immutable; else yarn install --frozen-lockfile; fi
+          elif [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Lint
+        if: inputs.run-lint
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-lint-command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND";
+          elif node -e 'const p=require("./package.json"); process.exit(p.scripts?.lint?0:1)'; then npm run lint;
+          else echo "No lint script found; skipped."; fi
+
+      - name: Test
+        if: inputs.run-tests
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-test-command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND";
+          elif node -e 'const p=require("./package.json"); process.exit(p.scripts?.test?0:1)'; then npm test;
+          else echo "No test script found; skipped."; fi
+
+      - name: Build
+        if: inputs.run-build
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-build-command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND";
+          elif node -e 'const p=require("./package.json"); process.exit(p.scripts?.build?0:1)'; then npm run build;
+          else echo "No build script found; skipped."; fi

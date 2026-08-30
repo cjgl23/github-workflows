@@ -1,0 +1,64 @@
+name: Reusable .NET CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directories-json: {required: true, type: string}
+      runner-os: {required: false, type: string, default: ubuntu-latest}
+      runtime-version: {required: false, type: string, default: ''}
+      run-lint: {required: false, type: boolean, default: true}
+      run-tests: {required: false, type: boolean, default: true}
+      run-build: {required: false, type: boolean, default: true}
+      custom-lint-command: {required: false, type: string, default: ''}
+      custom-test-command: {required: false, type: string, default: ''}
+      custom-build-command: {required: false, type: string, default: ''}
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet:
+    name: .NET (${{ matrix.directory }})
+    runs-on: ${{ inputs.runner-os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJSON(inputs.working-directories-json) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ inputs.runtime-version != '' && inputs.runtime-version || '8.0.x' }}
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Lint/custom validation
+        if: inputs.run-lint
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-lint-command }}
+        run: if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; else dotnet format --verify-no-changes --no-restore; fi
+
+      - name: Test
+        if: inputs.run-tests
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-test-command }}
+        run: if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; else dotnet test --no-restore --configuration Release; fi
+
+      - name: Build
+        if: inputs.run-build
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-build-command }}
+        run: if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; else dotnet build --no-restore --configuration Release; fi

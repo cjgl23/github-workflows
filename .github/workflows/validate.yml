@@ -1,0 +1,90 @@
+name: Validate Shared Workflows
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Run Python tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Verify supply-chain policy
+        run: python scripts/verify_supply_chain.py
+
+      - name: Validate installer shell syntax
+        run: bash -n scripts/install_actionlint.sh scripts/install_trivy.sh
+
+      - name: Install checksum-verified actionlint
+        run: ./scripts/install_actionlint.sh "$RUNNER_TEMP/actionlint-bin"
+
+      - name: Validate GitHub Actions YAML
+        run: actionlint -ignore 'property "workflow_repository" is not defined in object type'
+
+  fixture-node:
+    uses: ./.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/node
+
+  fixture-python:
+    uses: ./.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/python
+
+  fixture-go:
+    uses: ./.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/go
+
+  fixture-maven:
+    uses: ./.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/maven
+      run-lint: false
+
+  fixture-gradle:
+    uses: ./.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/gradle
+      run-lint: false
+
+  fixture-dotnet:
+    uses: ./.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/dotnet
+      run-lint: false
+
+  fixture-rust:
+    uses: ./.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/rust
+
+  fixture-generic:
+    uses: ./.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/generic
+
+  fixture-monorepo:
+    uses: ./.github/workflows/ci.yml
+    with:
+      working-directory: tests/fixtures/monorepo
+      run-lint: false
+      run-build: false

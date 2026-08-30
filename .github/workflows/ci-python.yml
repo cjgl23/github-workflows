@@ -1,0 +1,81 @@
+name: Reusable Python CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directories-json: {required: true, type: string}
+      runner-os: {required: false, type: string, default: ubuntu-latest}
+      runtime-version: {required: false, type: string, default: ''}
+      run-lint: {required: false, type: boolean, default: true}
+      run-tests: {required: false, type: boolean, default: true}
+      run-build: {required: false, type: boolean, default: true}
+      custom-lint-command: {required: false, type: string, default: ''}
+      custom-test-command: {required: false, type: string, default: ''}
+      custom-build-command: {required: false, type: string, default: ''}
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python (${{ matrix.directory }})
+    runs-on: ${{ inputs.runner-os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJSON(inputs.working-directories-json) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ inputs.runtime-version != '' && inputs.runtime-version || '3.12' }}
+
+      - name: Install project dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          if [[ -f requirements.txt ]]; then python -m pip install -r requirements.txt; fi
+          if [[ -f pyproject.toml || -f setup.py || -f setup.cfg ]]; then python -m pip install .; fi
+
+      - name: Lint
+        if: inputs.run-lint
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-lint-command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND";
+          elif python -c 'import ruff' >/dev/null 2>&1; then python -m ruff check .;
+          else echo "No unambiguous lint command found; skipped."; fi
+
+      - name: Test
+        if: inputs.run-tests
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-test-command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND";
+          elif python -c 'import pytest' >/dev/null 2>&1; then python -m pytest;
+          else echo "pytest is not installed by the project; skipped rather than guessing."; fi
+
+      - name: Build
+        if: inputs.run-build
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-build-command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND";
+          elif [[ -f pyproject.toml || -f setup.py || -f setup.cfg ]]; then python -m pip wheel . --no-deps --wheel-dir "$RUNNER_TEMP/wheels";
+          else echo "No buildable Python project metadata found; skipped."; fi

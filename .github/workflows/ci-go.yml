@@ -1,0 +1,80 @@
+name: Reusable Go CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directories-json: {required: true, type: string}
+      runner-os: {required: false, type: string, default: ubuntu-latest}
+      runtime-version: {required: false, type: string, default: ''}
+      run-lint: {required: false, type: boolean, default: true}
+      run-tests: {required: false, type: boolean, default: true}
+      run-build: {required: false, type: boolean, default: true}
+      custom-lint-command: {required: false, type: string, default: ''}
+      custom-test-command: {required: false, type: string, default: ''}
+      custom-build-command: {required: false, type: string, default: ''}
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go (${{ matrix.directory }})
+    runs-on: ${{ inputs.runner-os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJSON(inputs.working-directories-json) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from go.mod
+        if: inputs.runtime-version == ''
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: ${{ matrix.directory }}/go.mod
+
+      - name: Set up requested Go version
+        if: inputs.runtime-version != ''
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ${{ inputs.runtime-version }}
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Lint and vet
+        if: inputs.run-lint
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-lint-command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; exit; fi
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then echo "$unformatted"; exit 1; fi
+          go vet ./...
+
+      - name: Test
+        if: inputs.run-tests
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-test-command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; else go test ./...; fi
+
+      - name: Build
+        if: inputs.run-build
+        shell: bash
+        env:
+          CUSTOM_COMMAND: ${{ inputs.custom-build-command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CUSTOM_COMMAND" ]]; then bash -eo pipefail -c "$CUSTOM_COMMAND"; else go build ./...; fi
